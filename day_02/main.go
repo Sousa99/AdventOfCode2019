@@ -13,10 +13,12 @@ import (
 type Program struct {
 	pointer int
 	codes   []int
+	reset   []int
 }
 
 func (program *Program) append_code(code int) {
 	program.codes = append(program.codes, code)
+	program.reset = append(program.reset, code)
 }
 
 func (program *Program) run() {
@@ -64,6 +66,30 @@ func (program *Program) run() {
 	}
 }
 
+func (program *Program) reset_codes() {
+	program.pointer = 0
+	copy(program.codes, program.reset)
+}
+
+func (program *Program) find_param(target_value int) (int, int) {
+	var limit int = len(program.codes)
+
+	for noun := 0; noun < limit; noun++ {
+		for verb := 0; verb < limit; verb++ {
+			program.reset_codes()
+			program.codes[1] = noun
+			program.codes[2] = verb
+
+			program.run()
+			if program.codes[0] == target_value {
+				return noun, verb
+			}
+		}
+	}
+
+	return -1, -1
+}
+
 // ----------------------- Program Struct End -----------------------
 
 func main() {
@@ -79,7 +105,7 @@ func main() {
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 
-		var program Program = Program{0, make([]int, 0)}
+		var program Program = Program{0, make([]int, 0), make([]int, 0)}
 		// Iterate over split
 		var split []string = strings.Split(scanner.Text(), ",")
 		for _, code_string := range split {
@@ -92,5 +118,12 @@ func main() {
 		program.codes[2] = 2
 		program.run()
 		fmt.Println("Result: '", program.codes[0], "' (part 1)")
+
+		fmt.Println("-------------------------------------------")
+
+		// Run program (part 2)
+		var noun, verb int = program.find_param(19690720)
+		fmt.Println("Noun: '", noun, "' Verb: '", verb, "'")
+		fmt.Println("Result: '", 100*noun+verb, "' (part 2)")
 	}
 }
