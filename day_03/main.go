@@ -145,15 +145,6 @@ func get_min_distance(points []PanelPoint) int {
 
 // ----------------------- Panel Point Struct End -----------------------
 
-// ----------------------- Position Struct Start -----------------------
-
-type Point struct {
-	row    int
-	column int
-}
-
-// ----------------------- Position Struct End -----------------------
-
 // ----------------------- Panel Struct Start -----------------------
 
 type Panel struct {
