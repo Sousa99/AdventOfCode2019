@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"strconv"
+	"strings"
 )
 
 // ----------------------- Adventurer Struct Start -----------------------
@@ -23,9 +25,11 @@ type Position struct {
 	y int
 }
 
+type StatePositions = []Position
+
 type Vector struct {
-	from rune
-	to   rune
+	from string
+	to   string
 }
 
 var Directions []Position = []Position{
@@ -37,25 +41,25 @@ var Directions []Position = []Position{
 
 type Adventurer struct {
 	// Current state
-	position Position
+	positions StatePositions
 	// Mapping
 	top_left      Position
 	bottom_right  Position
 	mapping       map[Position]rune
-	keys_position map[rune]Position
+	keys_position map[string]Position
 }
 
 func (adventurer *Adventurer) add_mapping_position(position Position, mapping_code rune) {
 	// Add mapping
 	if mapping_code == AdventurerSymbol {
-		adventurer.keys_position[AdventurerSymbol] = position
-		adventurer.position = position
+		adventurer.keys_position[strconv.Itoa(len(adventurer.positions))+string(mapping_code)] = position
+		adventurer.positions = append(adventurer.positions, position)
 		mapping_code = FreeSymbol
 	}
 	adventurer.mapping[position] = mapping_code
 
 	if mapping_code >= FirstKeySymbol && mapping_code <= LastKeySymbol {
-		adventurer.keys_position[mapping_code] = position
+		adventurer.keys_position[string(mapping_code)] = position
 	}
 
 	// Update Limits
@@ -132,7 +136,7 @@ func (adventurer *Adventurer) compute_distances() map[Vector]int {
 
 					if map_code >= FirstKeySymbol && map_code <= LastKeySymbol {
 						// Found a key
-						distances[Vector{key, map_code}] = new_explorer.distance
+						distances[Vector{key, string(map_code)}] = new_explorer.distance
 					}
 				}
 			}
@@ -167,8 +171,10 @@ func (adventurer *Adventurer) compute_restrictions() map[rune][]rune {
 
 	var restrictions map[rune][]rune = make(map[rune][]rune)
 	visited_positions := make(map[Position]bool)
-	var current_explorers []RestrictionsExplorer = []RestrictionsExplorer{
-		RestrictionsExplorer{adventurer.position, adventurer.position, make([]rune, 0)},
+	var current_explorers []RestrictionsExplorer = make([]RestrictionsExplorer, 0, len(adventurer.positions))
+	for _, initial_position := range adventurer.positions {
+		new_restriction_explorer := RestrictionsExplorer{initial_position, initial_position, make([]rune, 0)}
+		current_explorers = append(current_explorers, new_restriction_explorer)
 	}
 
 	for len(current_explorers) > 0 {
@@ -221,16 +227,17 @@ func (adventurer *Adventurer) compute_states(distances map[Vector]int, restricti
 
 	/* =============== AUXILIARY STRUCT =============== */
 	type StateExplorer struct {
-		current_key rune
-		keys        []rune
+		current_keys []string
+		keys         []string
 	}
 
 	make_copy_state_explorer := func(original StateExplorer) StateExplorer {
-		copy_current_key := original.current_key
-		copy_keys := make([]rune, 0, len(original.keys))
+		copy_current_keys := make([]string, 0, len(original.current_keys))
+		copy_current_keys = append(copy_current_keys, original.current_keys...)
+		copy_keys := make([]string, 0, len(original.keys))
 		copy_keys = append(copy_keys, original.keys...)
 
-		var copy_little StateExplorer = StateExplorer{copy_current_key, copy_keys}
+		var copy_little StateExplorer = StateExplorer{copy_current_keys, copy_keys}
 		return copy_little
 	}
 
@@ -238,13 +245,17 @@ func (adventurer *Adventurer) compute_states(distances map[Vector]int, restricti
 
 	var map_graph MapGraph = make(MapGraph)
 
-	starting_explorer := StateExplorer{'@', make([]rune, 0)}
+	start_current_keys := make([]string, 0, len(adventurer.positions))
+	for index, _ := range adventurer.positions {
+		start_current_keys = append(start_current_keys, strconv.Itoa(index)+string(AdventurerSymbol))
+	}
+	starting_explorer := StateExplorer{start_current_keys, make([]string, 0)}
 	var current_explorers []StateExplorer = []StateExplorer{starting_explorer}
 
 	for explorer_index := 0; explorer_index < len(current_explorers); explorer_index++ {
 
 		current_explorer := current_explorers[explorer_index]
-		state_code := convert_state_to_code(current_explorer.current_key, current_explorer.keys)
+		state_code := convert_state_to_code(current_explorer.current_keys, current_explorer.keys)
 		_, map_set_for_state := map_graph[state_code]
 		if map_set_for_state {
 			continue
@@ -252,15 +263,16 @@ func (adventurer *Adventurer) compute_states(distances map[Vector]int, restricti
 
 		map_graph[state_code] = make([]Connection, 0)
 		for going_to, restrictions := range restrictions {
-			if going_to == current_explorer.current_key || slice_rune_contains(current_explorer.keys, going_to) {
+			going_to_string := string(going_to)
+			if slice_string_contains(current_explorer.current_keys, going_to_string) || slice_string_contains(current_explorer.keys, going_to_string) {
 				// No interest in going to itself or somewhere it has been
 				continue
 			}
 
 			has_keys_needed := true
 			for _, door_encountered := range restrictions {
-				key_needed := convert_door_to_key(door_encountered)
-				if !slice_rune_contains(current_explorer.keys, key_needed) && key_needed != current_explorer.current_key {
+				key_needed := string(convert_door_to_key(door_encountered))
+				if !slice_string_contains(current_explorer.keys, key_needed) && !slice_string_contains(current_explorer.current_keys, key_needed) {
 					has_keys_needed = false
 				}
 			}
@@ -270,21 +282,37 @@ func (adventurer *Adventurer) compute_states(distances map[Vector]int, restricti
 				continue
 			}
 
-			// Create new state
-			new_state_explorer := make_copy_state_explorer(current_explorer)
-			new_state_explorer.keys = append(new_state_explorer.keys, new_state_explorer.current_key)
-			new_state_explorer.current_key = going_to
-			current_explorers = append(current_explorers, new_state_explorer)
+			for adventurer_index := 0; adventurer_index < len(adventurer.positions); adventurer_index++ {
+				distance, possible_choice := distances[Vector{current_explorer.current_keys[adventurer_index], going_to_string}]
+				if !possible_choice {
+					// If current adventurer doens't connect skip
+					continue
+				}
 
-			// Add connection
-			distance := distances[Vector{current_explorer.current_key, going_to}]
-			new_state_code := convert_state_to_code(new_state_explorer.current_key, new_state_explorer.keys)
-			new_connection := Connection{new_state_code, distance}
-			map_graph[state_code] = append(map_graph[state_code], new_connection)
+				// Create new state
+				new_state_explorer := make_copy_state_explorer(current_explorer)
+				new_state_explorer.keys = append(new_state_explorer.keys, new_state_explorer.current_keys[adventurer_index])
+				new_state_explorer.current_keys[adventurer_index] = going_to_string
+				current_explorers = append(current_explorers, new_state_explorer)
+
+				// Add connection
+				new_state_code := convert_state_to_code(new_state_explorer.current_keys, new_state_explorer.keys)
+				new_connection := Connection{new_state_code, distance}
+				map_graph[state_code] = append(map_graph[state_code], new_connection)
+			}
 		}
 	}
 
 	return map_graph
+}
+
+func (adventurer *Adventurer) get_default_source_code() string {
+	start_current_keys := make([]string, 0, len(adventurer.positions))
+	for index, _ := range adventurer.positions {
+		start_current_keys = append(start_current_keys, strconv.Itoa(index)+string(AdventurerSymbol))
+	}
+
+	return convert_state_to_code(start_current_keys, make([]string, 0))
 }
 
 func (adventurer *Adventurer) print_mapping(print_adventurer bool) {
@@ -293,7 +321,7 @@ func (adventurer *Adventurer) print_mapping(print_adventurer bool) {
 	// Iterate until last line
 	for current_position.y <= adventurer.bottom_right.y {
 		code := adventurer.mapping[current_position]
-		if print_adventurer && adventurer.position == current_position {
+		if print_adventurer && slice_position_contains(adventurer.positions, current_position) {
 			code = AdventurerSymbol
 		}
 
@@ -350,7 +378,7 @@ type Connection struct {
 
 type MapGraph = map[StateCode][]Connection
 
-func run_dijkstra(connections MapGraph) int {
+func run_dijkstra(source_code string, connections MapGraph) int {
 
 	type Node struct {
 		distance int
@@ -362,7 +390,6 @@ func run_dijkstra(connections MapGraph) int {
 	heap.Init(node_heap)
 	nodes := make(map[string]Node)
 
-	source_code := convert_state_to_code('@', make([]rune, 0))
 	// Initialize nodes in correct form
 	for node_name, _ := range connections {
 
@@ -428,16 +455,6 @@ func convert_door_to_key(door rune) rune {
 	return key
 }
 
-func slice_rune_contains(slice []rune, elem rune) bool {
-	for _, slice_elem := range slice {
-		if slice_elem == elem {
-			return true
-		}
-	}
-
-	return false
-}
-
 func slice_string_contains(slice []string, elem string) bool {
 	for _, slice_elem := range slice {
 		if slice_elem == elem {
@@ -448,22 +465,42 @@ func slice_string_contains(slice []string, elem string) bool {
 	return false
 }
 
-func convert_state_to_code(current_key rune, keys []rune) string {
+func slice_position_contains(slice []Position, elem Position) bool {
+	for _, slice_elem := range slice {
+		if slice_elem == elem {
+			return true
+		}
+	}
+
+	return false
+}
+
+func convert_state_to_code(current_keys []string, keys []string) string {
+	var number_positions int = len(current_keys)
 	var final_code []rune = make([]rune, 0)
+	for index := 0; index < number_positions; index++ {
+		final_code = append(final_code, '0')
+	}
+
+	final_code = append(final_code, ',')
 	for code := FirstKeySymbol; code <= LastKeySymbol; code++ {
 		final_code = append(final_code, '0')
 	}
 
 	for _, key := range keys {
-		if key != AdventurerSymbol {
-			key_translated := key - FirstKeySymbol
-			final_code[int(key_translated)] = '1'
+		if !strings.ContainsRune(key, AdventurerSymbol) {
+			key_translated := key[0] - FirstKeySymbol
+			final_code[number_positions+1+int(key_translated)] = '1'
 		}
 	}
 
-	if current_key != AdventurerSymbol {
-		key_translated := current_key - FirstKeySymbol
-		final_code[int(key_translated)] = '2'
+	for index, current_key := range current_keys {
+		if !strings.ContainsRune(current_key, AdventurerSymbol) {
+			key_translated := current_key[0] - FirstKeySymbol
+			final_code[number_positions+1+int(key_translated)] = '2'
+		} else {
+			final_code[index] = '1'
+		}
 	}
 
 	return string(final_code)
@@ -473,32 +510,60 @@ func main() {
 
 	// ----------------- SETUP INPUT TXT -----------------
 	// Trying to open file
-	file, _ := os.Open("input.txt")
+	file1, _ := os.Open("input_part1.txt")
+	file2, _ := os.Open("input_part2.txt")
 	// Defer closing of file
-	defer file.Close()
+	defer file1.Close()
+	defer file2.Close()
 	// ----------------- FINISHED INPUT TXT -----------------
 
 	position_0 := Position{0, 0}
-	var adventurer Adventurer = Adventurer{position_0, position_0, position_0, make(map[Position]rune), make(map[rune]Position)}
+	var adventurer_part1 Adventurer = Adventurer{make([]Position, 0), position_0, position_0, make(map[Position]rune), make(map[string]Position)}
+	var adventurer_part2 Adventurer = Adventurer{make([]Position, 0), position_0, position_0, make(map[Position]rune), make(map[string]Position)}
 
-	// Create scanner over file
-	scanner := bufio.NewScanner(file)
+	// Create scanner over file for Part 1
+	scanner := bufio.NewScanner(file1)
 	line_index := 0
 	for scanner.Scan() {
 
 		var line string = scanner.Text()
 		for column_index, characther := range line {
 			new_position := Position{column_index, line_index}
-			adventurer.add_mapping_position(new_position, characther)
+			adventurer_part1.add_mapping_position(new_position, characther)
 		}
 
 		line_index = line_index + 1
 	}
 
+	// Create scanner over file for Part 1
+	scanner = bufio.NewScanner(file2)
+	line_index = 0
+	for scanner.Scan() {
+
+		var line string = scanner.Text()
+		for column_index, characther := range line {
+			new_position := Position{column_index, line_index}
+			adventurer_part2.add_mapping_position(new_position, characther)
+		}
+
+		line_index = line_index + 1
+	}
+
+	// Part 1
 	//adventurer.print_mapping(true)
-	distances := adventurer.compute_distances()
-	restrictions := adventurer.compute_restrictions()
-	map_graph := adventurer.compute_states(distances, restrictions)
-	min_distance := run_dijkstra(map_graph)
+	distances := adventurer_part1.compute_distances()
+	restrictions := adventurer_part1.compute_restrictions()
+	map_graph := adventurer_part1.compute_states(distances, restrictions)
+	start_code := adventurer_part1.get_default_source_code()
+	min_distance := run_dijkstra(start_code, map_graph)
 	fmt.Printf("The minimum distance is ' %d ' (part 1)\n", min_distance)
+
+	// Part 2
+	//adventurer.print_mapping(true)
+	distances = adventurer_part2.compute_distances()
+	restrictions = adventurer_part2.compute_restrictions()
+	map_graph = adventurer_part2.compute_states(distances, restrictions)
+	start_code = adventurer_part2.get_default_source_code()
+	min_distance = run_dijkstra(start_code, map_graph)
+	fmt.Printf("The minimum distance is ' %d ' (part 2)\n", min_distance)
 }
