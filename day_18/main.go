@@ -2,10 +2,10 @@ package main
 
 import (
 	"bufio"
+	"container/heap"
 	"fmt"
 	"math"
 	"os"
-	"sort"
 )
 
 // ----------------------- Adventurer Struct Start -----------------------
@@ -315,6 +315,32 @@ func (adventurer *Adventurer) print_mapping(print_adventurer bool) {
 
 // ----------------------- Djikstra Algorithm Start -----------------------
 
+// ----------- HEAP -----------
+type HeapOfNodes []HeapNode
+
+func (h HeapOfNodes) Len() int           { return len(h) }
+func (h HeapOfNodes) Less(i, j int) bool { return h[i].distance < h[j].distance }
+func (h HeapOfNodes) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
+
+func (h *HeapOfNodes) Push(x interface{}) {
+	*h = append(*h, x.(HeapNode))
+}
+
+func (h *HeapOfNodes) Pop() interface{} {
+	old := *h
+	n := len(old)
+	x := old[n-1]
+	*h = old[0 : n-1]
+	return x
+}
+
+type HeapNode struct {
+	name     string
+	distance int
+}
+
+// ----------- HEAP -----------
+
 type StateCode = string
 
 type Connection struct {
@@ -329,45 +355,54 @@ func run_dijkstra(connections MapGraph) int {
 	type Node struct {
 		distance int
 		previous string
+		visited  bool
 	}
 
+	node_heap := &HeapOfNodes{}
+	heap.Init(node_heap)
+	nodes := make(map[string]Node)
+
+	source_code := convert_state_to_code('@', make([]rune, 0))
 	// Initialize nodes in correct form
-	var nodes map[string]Node = make(map[string]Node)
 	for node_name, _ := range connections {
+
+		if node_name == source_code {
+			continue
+		}
+
 		// Add node
-		new_node := Node{math.MaxInt32, ""}
-		nodes[node_name] = new_node
+		heap.Push(node_heap, HeapNode{node_name, math.MaxInt32})
+		nodes[node_name] = Node{math.MaxInt32, "", false}
 	}
 
 	// Initialize source with dist 0
-	source_code := convert_state_to_code('@', make([]rune, 0))
-	source_node, _ := nodes[source_code]
-	source_node.distance = 0
-	nodes[source_code] = source_node
-	var active_vertexes []string = []string{source_code}
+	heap.Push(node_heap, HeapNode{source_code, 0})
+	nodes[source_code] = Node{0, "", false}
 
 	// Run algorithm
-	for len(active_vertexes) > 0 {
+	for node_heap.Len() > 0 {
 
-		// Sort and remove first element
-		sort.Slice(active_vertexes, func(i, j int) bool { return nodes[active_vertexes[i]].distance < nodes[active_vertexes[j]].distance })
-		node_name := active_vertexes[0]
-		active_vertexes = active_vertexes[1:]
-
-		if len(connections[node_name]) == 0 {
+		// Get minimum
+		var heap_node HeapNode = heap.Pop(node_heap).(HeapNode)
+		var node Node = nodes[heap_node.name]
+		if len(connections[heap_node.name]) == 0 {
 			// We are only interest in target
-			return nodes[node_name].distance
+			return node.distance
 		}
 
-		for _, connection := range connections[node_name] {
+		// Don't go for visited states
+		if node.visited {
+			continue
+		}
 
-			alt := nodes[node_name].distance + connection.distance
+		node.visited = true
+		nodes[heap_node.name] = node
+		for _, connection := range connections[heap_node.name] {
+
+			alt := node.distance + connection.distance
 			if alt < nodes[connection.state_to].distance {
-				nodes[connection.state_to] = Node{alt, node_name}
-
-				if !slice_string_contains(active_vertexes, connection.state_to) {
-					active_vertexes = append(active_vertexes, connection.state_to)
-				}
+				nodes[connection.state_to] = Node{alt, heap_node.name, false}
+				heap.Push(node_heap, HeapNode{connection.state_to, alt})
 			}
 		}
 	}
